@@ -9,6 +9,10 @@
 
 A read-only dashboard card for an AEG dishwasher in Home Assistant 2026.10 or later. It shows the programme, phase, estimated progress, finish time, door and alerts. The illustration animates when a cycle is running, scheduled or finished with the door closed. The card respects reduced-motion preferences and displays labels in Hungarian or English.
 
+The card reads dishwasher data from Home Assistant entities provided by the [AEG integration maintained by Renaud Allard](https://github.com/renaudallard/homeassistant_aeg).
+
+This is an independent community project. The AEG name and logo belong to AEG.
+
 ## Install
 
 1. In HACS, open **Custom repositories** and add `https://github.com/wzsolt/ha-card-dishwasher` as a **Dashboard** repository.
