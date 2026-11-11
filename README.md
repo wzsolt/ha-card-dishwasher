@@ -13,7 +13,7 @@ A read-only dashboard card for an AEG dishwasher in Home Assistant 2026.10 or la
 
 1. In HACS, open **Custom repositories** and add `https://github.com/wzsolt/ha-card-dishwasher` as a **Dashboard** repository.
 2. Download **AEG Dishwasher Card** and reload the dashboard. If you manage resources in YAML, register the JavaScript module URL shown by HACS.
-3. Edit the dashboard, add **AEG Dishwasher Card**, and select the entities in the visual editor. You can also paste the YAML below into a manual card.
+3. Edit the dashboard, add **AEG Dishwasher Card**, and select your dishwasher in the visual editor. If one dishwasher is recognized, the card picker pre-fills its configuration. You can also paste the YAML below into a manual card.
 
 ### Manual installation
 
@@ -21,27 +21,21 @@ Download `ha-card-dishwasher.js` from the [latest release](https://github.com/wz
 
 ## Configuration
 
-Use the entities supplied by your dishwasher integration. The example uses the `kitchen_dishwasher` entity IDs.
+Choose the dishwasher in the visual editor to populate its entity mappings. If several dishwashers are present, select one device or its appliance state sensor. Discovery uses matching entity IDs and the Home Assistant device and entity registries. Review the populated fields and select any entities the card could not identify. Explicit YAML settings take precedence over discovery.
+
+The following dashboard YAML uses the appliance state sensor to identify the other entities for a `kitchen_dishwasher` installation. The [example file](examples/aeg-dishwasher.yaml) is ready to paste into a manual card.
 
 ```yaml
 type: custom:ha-card-dishwasher
 state_entity: sensor.kitchen_dishwasher_state
-programme_entity: select.kitchen_dishwasher_programme
-cycle_phase_entity: sensor.kitchen_dishwasher_cycle_phase
-door_entity: sensor.kitchen_dishwasher_door
-connection_entity: binary_sensor.kitchen_dishwasher_connection
-alerts_entity: binary_sensor.kitchen_dishwasher_alerts
-cycles_run_entity: sensor.kitchen_dishwasher_cycles_run
-finishes_at_entity: sensor.kitchen_dishwasher_finishes_at
-time_to_end_formatted_entity: sensor.kitchen_dishwasher_time_to_end_formatted
-saved_programme_entity: sensor.dishwasher_saved_programme
-time_remaining_entity: sensor.dishwasher_time_remaining
-progress_percentage_entity: sensor.dishwasher_progress_percentage
 ```
+
+Use `device_id` or `state_entity` to choose the appliance in YAML. If a single dishwasher is recognized, `type: custom:ha-card-dishwasher` is enough. These options are available for manual mappings.
 
 | Option | Purpose |
 | --- | --- |
-| `state_entity` | Required. Appliance state, such as `RUNNING`, `PAUSED`, `DELAYED_START` or `END_OF_CYCLE`. |
+| `device_id` | Home Assistant device ID for discovering the appliance and its entities. |
+| `state_entity` | Appliance state, such as `RUNNING`, `PAUSED`, `DELAYED_START` or `END_OF_CYCLE`. |
 | `programme_entity` | Programme select entity. The header shows the programme and adds a leaf for Eco. |
 | `cycle_phase_entity` | Active phase, such as prewash, rinse, or drying. |
 | `door_entity` | Door state. A known closed door is required for animation. |
@@ -49,20 +43,18 @@ progress_percentage_entity: sensor.dishwasher_progress_percentage
 | `alerts_entity` | Binary sensor. An `on` state shows a warning. |
 | `cycles_run_entity` | Cumulative completed cycle count. |
 | `finishes_at_entity` | Timestamp for the estimated finish, displayed in Home Assistant's configured time zone. |
-| `time_to_end_formatted_entity` | Remaining time in `H:MM` or `H:MM:SS`, used when remaining seconds are unavailable. |
-| `saved_programme_entity` | Template sensor that preserves the last valid programme during the cycle. |
-| `time_remaining_entity` | Template sensor with the remaining time in seconds. |
-| `progress_percentage_entity` | Template sensor with the estimated progress. The card shows 100% when the appliance reports completion. |
+| `time_to_end_entity` | Numeric remaining time from the appliance. The card reads the sensor unit and defaults to seconds when absent. |
+| `time_to_end_formatted_entity` | Remaining time in `H:MM` or `H:MM:SS`, used when the numeric countdown is unavailable. |
 
-### Save the programme and estimate progress
+### Programme and estimated progress
 
-If the template sensors already exist, select those entities in the card. Otherwise add the blocks under `template:` in [the template sensor example](examples/dishwasher-sensors.yaml) to your existing `template:` list in `configuration.yaml`. If you do not already have a `template:` key, include it once. Replace the raw dishwasher entity IDs with yours, including the numeric `time_to_end` sensor. Check the Home Assistant configuration, reload Template entities, then confirm the entity IDs in **Developer tools → States**. [Home Assistant Template integration](https://www.home-assistant.io/integrations/template/)
+The card uses [Home Assistant Recorder](https://www.home-assistant.io/integrations/recorder/) to find the latest cycle in the past three days, recover the last programme selected before it started, and read the initial duration near the transition to running. It can recover these values even if the dashboard was closed during the transition. Recorder must retain the appliance state, programme selection and at least one of the timing entities. With incomplete history, the card keeps showing current readings and displays the recovered programme and estimate when the necessary records are available. The estimate is capped at 99% until the appliance reports completion.
 
-The trigger-based sensors run on the Home Assistant server and restore their values after a restart. The progress estimate uses the remaining time captured when a running cycle first reports a positive duration. A cycle that is already running at setup can use only its current remaining time as a baseline. If the programme select is already unavailable and there is no saved programme, the header shows “Programme data unavailable” until a valid selection can be captured.
+### Migrate from v0.1 or Button Card
 
-## Migrate from Button Card
+Update the card and replace the old dashboard YAML with the short example above, or choose the device again in the visual editor. This setup uses the appliance entities and Recorder and requires no template entries in `configuration.yaml`.
 
-Keep your existing dishwasher template sensors. Install this card, then replace the old card YAML with [the standalone card example](examples/aeg-dishwasher.yaml) and update the entity IDs if they differ. Confirm the programme, progress and door state. The illustrations and animations ship in the JavaScript module.
+Existing card YAML can still use `saved_programme_entity`, `time_remaining_entity`, and `progress_percentage_entity` as overrides. If you want to remove your old template sensors, first check whether another card or automation uses them. The [legacy template example](examples/dishwasher-sensors.yaml) remains available for those setups.
 
 ## Develop and release
 

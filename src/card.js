@@ -4,9 +4,11 @@ import runningImage from "./assets/running.webp";
 import runningBaseline from "./assets/running-baseline.webp";
 import delayedImage from "./assets/delayed.webp";
 import finishedImage from "./assets/finished.webp";
-import { CARD_TYPE, normalizeConfig } from "./config.js";
+import { CARD_TYPE, discoverEntities, normalizeConfig, resolveConfig } from "./config.js";
 import { dishwasherView } from "./data.js";
 import { DishwasherEditor, loadEditorForm } from "./editor.js";
+import { CycleHistory } from "./history.js";
+import { labels } from "./text.js";
 import { styles } from "./styles.js";
 
 const animations = { running: runningImage, delayed: delayedImage, finished: finishedImage };
@@ -16,7 +18,8 @@ const template = document.createElement("template");
 template.innerHTML = `
   <style>${styles}</style>
   <ha-card>
-    <div class="dw">
+    <div class="dw-setup" hidden></div>
+    <div class="dw" hidden>
       <div class="dw-header">
         <div class="dw-emblem" aria-hidden="true"><ha-icon icon="mdi:dishwasher"></ha-icon></div>
         <div class="dw-heading">
@@ -66,6 +69,9 @@ class DishwasherCard extends HTMLElement {
       "title", "program", "eco", "cycle-count", "appliance", "appliance-frame", "steam",
       "percent", "percent-value", "status", "track", "fill", "time", "phase", "door", "alert",
     ].map((name) => [name, this.shadowRoot.querySelector(".dw-" + name)]));
+    this.dashboard = this.shadowRoot.querySelector(".dw");
+    this.setupMessage = this.shadowRoot.querySelector(".dw-setup");
+    this.history = new CycleHistory(() => this.update());
     this.phaseText = this.nodes.phase.appendChild(document.createTextNode(""));
     this.image = this.nodes["appliance-frame"].querySelector("img");
     this.nodes.steam.style.setProperty("--dw-steam-motion", `url("${runningImage}")`);
@@ -78,8 +84,7 @@ class DishwasherCard extends HTMLElement {
   }
 
   static getStubConfig(hass) {
-    const state = Object.keys(hass?.states ?? {}).find((id) => /^sensor\..*dishwasher_state$/.test(id));
-    return { type: "custom:" + CARD_TYPE, ...(state && { state_entity: state }) };
+    return { type: "custom:" + CARD_TYPE, ...discoverEntities(hass ?? {}) };
   }
 
   getCardSize() {
@@ -91,15 +96,23 @@ class DishwasherCard extends HTMLElement {
   }
 
   setConfig(config) {
-    const normalized = normalizeConfig(config);
-    if (!normalized.state_entity) throw new Error("Select the dishwasher state entity.");
-    this.config = normalized;
+    this.config = normalizeConfig(config);
     this.update();
   }
 
   set hass(hass) {
     this._hass = hass;
     this.update();
+  }
+
+  connectedCallback() {
+    this.clock = setInterval(() => this.update(), 30_000);
+    this.update();
+  }
+
+  disconnectedCallback() {
+    clearInterval(this.clock);
+    this.history.clear();
   }
 
   updatePicture(door, animation) {
@@ -124,7 +137,17 @@ class DishwasherCard extends HTMLElement {
 
   update() {
     if (!this.config || !this._hass) return;
-    const view = dishwasherView(this._hass, this.config);
+    const hass = this._hass;
+    const config = resolveConfig(hass, this.config);
+    this.dashboard.hidden = !config.state_entity;
+    this.setupMessage.hidden = Boolean(config.state_entity);
+    if (!config.state_entity) {
+      this.history.clear();
+      setText(this.setupMessage, labels(hass).selectDishwasher);
+      return;
+    }
+    const cycle = this.isConnected ? this.history.update(hass, config) : {};
+    const view = dishwasherView(hass, config, Date.now(), cycle);
     const { text, door, percent } = view;
     const nodes = this.nodes;
 

@@ -1,13 +1,2 @@
 type: custom:ha-card-dishwasher
 state_entity: sensor.kitchen_dishwasher_state
-programme_entity: select.kitchen_dishwasher_programme
-cycle_phase_entity: sensor.kitchen_dishwasher_cycle_phase
-door_entity: sensor.kitchen_dishwasher_door
-connection_entity: binary_sensor.kitchen_dishwasher_connection
-alerts_entity: binary_sensor.kitchen_dishwasher_alerts
-cycles_run_entity: sensor.kitchen_dishwasher_cycles_run
-finishes_at_entity: sensor.kitchen_dishwasher_finishes_at
-time_to_end_formatted_entity: sensor.kitchen_dishwasher_time_to_end_formatted
-saved_programme_entity: sensor.dishwasher_saved_programme
-time_remaining_entity: sensor.dishwasher_time_remaining
-progress_percentage_entity: sensor.dishwasher_progress_percentage

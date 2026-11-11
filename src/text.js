@@ -12,7 +12,6 @@ const en = {
   alert: "Warning",
   finishTime: (time) => `Ends at ${time}`,
   remaining: (hours, minutes) => `${hours ? hours + " h " : ""}${minutes} min remaining`,
-  remainingClock: (clock) => `${clock} remaining`,
   states: {
     ready: "Ready to start", readytostart: "Ready to start", idle: "Standby", standby: "Standby",
     off: "Off", delayedstart: "Delayed start", error: "Error", actionrequired: "Action required",
@@ -24,11 +23,16 @@ const en = {
     rinse: "Rinsing", rinsing: "Rinsing", finalrinse: "Final rinse", dry: "Drying", drying: "Drying",
     doordrying: "Drying with the door open", drain: "Draining", draining: "Draining",
   },
-  fields: [
-    "Dishwasher state (required)", "Programme", "Cycle phase", "Door", "Connection", "Alerts",
-    "Completed cycles", "Estimated finish", "Formatted remaining time", "Saved programme",
-    "Remaining time in seconds", "Estimated progress percentage",
-  ],
+  remainingClock: (clock) => `${clock} remaining`,
+  selectDishwasher: "Select the dishwasher or its state entity.",
+  fields: {
+    device_id: "Dishwasher device", state_entity: "Dishwasher state", programme_entity: "Programme",
+    cycle_phase_entity: "Cycle phase", door_entity: "Door", connection_entity: "Connection",
+    alerts_entity: "Alerts", cycles_run_entity: "Completed cycles", finishes_at_entity: "Estimated finish",
+    time_to_end_entity: "Remaining time", time_to_end_formatted_entity: "Formatted remaining time",
+    saved_programme_entity: "Saved programme (legacy)", time_remaining_entity: "Remaining seconds (legacy)",
+    progress_percentage_entity: "Estimated progress (legacy)",
+  },
 };
 
 const hu = {
@@ -45,7 +49,6 @@ const hu = {
   alert: "Figyelmeztetés",
   finishTime: (time) => `Vége ${time}`,
   remaining: (hours, minutes) => `${hours ? hours + " óra " : ""}${minutes} perc van hátra`,
-  remainingClock: (clock) => `${clock} van hátra`,
   states: {
     ready: "Indításra kész", readytostart: "Indításra kész", idle: "Készenlét", standby: "Készenlét",
     off: "Kikapcsolva", delayedstart: "Késleltetett indítás", error: "Hiba",
@@ -58,11 +61,16 @@ const hu = {
     rinse: "Öblítés", rinsing: "Öblítés", finalrinse: "Utolsó öblítés", dry: "Szárítás", drying: "Szárítás",
     doordrying: "Szárítás nyitott ajtóval", drain: "Vízleeresztés", draining: "Vízleeresztés",
   },
-  fields: [
-    "Mosogatógép állapota (kötelező)", "Program", "Ciklusfázis", "Ajtó", "Kapcsolat", "Figyelmeztetések",
-    "Lefutott ciklusok", "Várható befejezés", "Formázott hátralévő idő", "Mentett program",
-    "Hátralévő idő másodpercben", "Becsült készültség százalékban",
-  ],
+  remainingClock: (clock) => `${clock} van hátra`,
+  selectDishwasher: "Válaszd ki a mosogatógépet vagy az állapotentitását.",
+  fields: {
+    device_id: "Mosogatógép", state_entity: "Mosogatógép állapota", programme_entity: "Program",
+    cycle_phase_entity: "Ciklusfázis", door_entity: "Ajtó", connection_entity: "Kapcsolat",
+    alerts_entity: "Figyelmeztetések", cycles_run_entity: "Lefutott ciklusok", finishes_at_entity: "Várható befejezés",
+    time_to_end_entity: "Hátralévő idő", time_to_end_formatted_entity: "Formázott hátralévő idő",
+    saved_programme_entity: "Mentett program (korábbi)", time_remaining_entity: "Hátralévő másodperc (korábbi)",
+    progress_percentage_entity: "Becsült készültség (korábbi)",
+  },
 };
 
 export function localeFor(hass) {

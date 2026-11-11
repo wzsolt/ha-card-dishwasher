@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { parse } from "yaml";
 import { normalizeConfig } from "../src/config.js";
 import { dishwasherView } from "../src/data.js";
 
-const config = parse(readFileSync(new URL("../examples/aeg-dishwasher.yaml", import.meta.url), "utf8"));
+import { fixture as config } from "./fixture.js";
 const now = Date.parse("2026-11-11T09:00:00Z");
 
 function view(overrides = {}, extra = {}) {

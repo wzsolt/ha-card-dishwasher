@@ -1,11 +1,11 @@
 {
   "name": "ha-card-dishwasher",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "esbuild src/card.js --bundle --loader:.webp=dataurl --format=esm --target=es2022 --outfile=dist/ha-card-dishwasher.js",
-    "test": "node --test test/data.test.js",
+    "test": "node --test test/data.test.js test/history.test.js",
     "test:browser": "node --test test/browser.test.js",
     "lint": "eslint . --max-warnings 0"
   },
