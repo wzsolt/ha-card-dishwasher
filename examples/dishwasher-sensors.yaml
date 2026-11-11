@@ -1,0 +1,155 @@
+template:
+  - sensor:
+      - name: "Mosogatógép ciklusfázis"
+        unique_id: kitchen_dishwasher_dashboard_progress
+        default_entity_id: sensor.dishwasher_progress
+        state: >-
+          {% set mode = states('sensor.kitchen_dishwasher_state') | trim | lower | replace('-', '_') | replace(' ', '_') %}
+          {% if is_state('binary_sensor.kitchen_dishwasher_connection', 'off') %}
+            offline
+          {% elif mode in ['running', 'run'] %}
+            {% set phase = states('sensor.kitchen_dishwasher_cycle_phase') | trim | lower | replace('-', '') | replace('_', '') | replace(' ', '') %}
+            {% set phases = {
+              'prewash': 'pre-wash', 'prerinse': 'pre-wash',
+              'mainwash': 'washing', 'wash': 'washing', 'washing': 'washing',
+              'rinse': 'rinsing', 'rinsing': 'rinsing', 'finalrinse': 'rinsing',
+              'dry': 'drying', 'drying': 'drying', 'doordrying': 'drying'
+            } %}
+            {{ phases.get(phase, 'running') }}
+          {% elif mode in ['end_of_cycle', 'endofcycle', 'finished', 'complete'] %}
+            finished
+          {% elif mode in ['pause', 'paused'] %}
+            paused
+          {% else %}
+            {{ mode }}
+          {% endif %}
+
+      - name: "Mosogatógép állapot"
+        unique_id: kitchen_dishwasher_dashboard_status
+        default_entity_id: sensor.dishwasher_status
+        state: >-
+          {% set phase = states('sensor.dishwasher_progress') %}
+          {% set labels = {
+            'pre-wash': 'Előmosás', 'washing': 'Mosás', 'rinsing': 'Öblítés',
+            'drying': 'Szárítás', 'running': 'Fut a program', 'finished': 'Kész',
+            'paused': 'Szünetel', 'delayed_start': 'Késleltetett indítás',
+            'idle': 'Nincs futó program', 'standby': 'Készenlét',
+            'ready': 'Indításra kész', 'ready_to_start': 'Indításra kész',
+            'off': 'Kikapcsolva', 'offline': 'Nincs kapcsolat',
+            'error': 'Hiba', 'unknown': 'Nincs állapotadat',
+            'unavailable': 'Nincs állapotadat'
+          } %}
+          {{ labels.get(phase, phase | replace('_', ' ')) }}
+
+      - name: "Mosogatógép hátralévő idő"
+        unique_id: kitchen_dishwasher_dashboard_time_remaining
+        default_entity_id: sensor.dishwasher_time_remaining
+        device_class: duration
+        unit_of_measurement: s
+        state: >-
+          {% set mode = states('sensor.kitchen_dishwasher_state') | trim | lower %}
+          {% set finish = as_timestamp(states('sensor.kitchen_dishwasher_finishes_at'), 0) %}
+          {% set countdown = finish - as_timestamp(now()) if mode in ['running', 'run'] and finish > 0 else -1 %}
+          {% set raw = states('sensor.kitchen_dishwasher_time_to_end') %}
+          {% set unit = state_attr('sensor.kitchen_dishwasher_time_to_end', 'unit_of_measurement') or 's' %}
+          {% set units = {'s': 1, 'sec': 1, 'seconds': 1, 'min': 60, 'minutes': 60, 'h': 3600, 'hours': 3600} %}
+          {% set factor = units.get(unit | lower) %}
+          {% if countdown >= 0 %}
+            {{ countdown | round(0, 'ceil') | int }}
+          {% elif factor and is_number(raw) and (raw | float) >= 0 %}
+            {{ ((raw | float) * factor) | round(0) | int }}
+          {% else %}
+            {% set clock = states('sensor.kitchen_dishwasher_time_to_end_formatted').split(':') %}
+            {% if clock | length in [2, 3] %}
+              {% set h = clock[0] | int(-1) %}
+              {% set m = clock[1] | int(-1) %}
+              {% set s = clock[2] | int(-1) if clock | length == 3 else 0 %}
+              {{ h * 3600 + m * 60 + s if h >= 0 and 0 <= m < 60 and 0 <= s < 60 else none }}
+            {% else %}
+              {{ none }}
+            {% endif %}
+          {% endif %}
+  - triggers:
+      - trigger: state
+        entity_id:
+          - sensor.kitchen_dishwasher_state
+          - sensor.dishwasher_time_remaining
+        to: null
+      - trigger: homeassistant
+        event: start
+    variables:
+      mode: "{{ states('sensor.kitchen_dishwasher_state') | trim | lower | replace('-', '_') | replace(' ', '_') }}"
+      remaining: "{{ states('sensor.dishwasher_time_remaining') | int(-1) }}"
+    sensor:
+      - name: "Mosogatógép becsült készültség"
+        unique_id: kitchen_dishwasher_dashboard_progress_percentage
+        default_entity_id: sensor.dishwasher_progress_percentage
+        unit_of_measurement: "%"
+        icon: mdi:progress-clock
+        state: >-
+          {% set initial = this.attributes.get('initial_duration_seconds', 0) | int(0) %}
+          {% if mode in ['end_of_cycle', 'endofcycle', 'finished', 'complete'] %}
+            100
+          {% elif mode in ['running', 'run'] and remaining >= 0 %}
+            {% if initial > 0 %}
+              {% set estimate = ((initial - remaining) * 100 / initial) | int %}
+              {{ [0, [99, estimate] | min] | max }}
+            {% else %}
+              {{ 0 if remaining > 0 else none }}
+            {% endif %}
+          {% elif mode in ['running', 'run', 'paused', 'pause', 'unknown', 'unavailable'] %}
+            {{ this.state | int(none) if initial > 0 else none }}
+          {% else %}
+            0
+          {% endif %}
+        attributes:
+          initial_duration_seconds: >-
+            {% set initial = this.attributes.get('initial_duration_seconds', 0) | int(0) %}
+            {% if mode in ['running', 'run'] and initial <= 0 %}
+              {{ [0, remaining] | max }}
+            {% elif mode in ['running', 'run', 'paused', 'pause', 'unknown', 'unavailable'] %}
+              {{ initial }}
+            {% else %}
+              0
+            {% endif %}
+  - triggers:
+      - trigger: state
+        entity_id: select.kitchen_dishwasher_programme
+        to: null
+        id: programme
+      - trigger: state
+        entity_id: sensor.kitchen_dishwasher_state
+        to: null
+        id: appliance
+      - trigger: homeassistant
+        event: start
+        id: startup
+    sensor:
+      - name: "Mosogatógép mentett program"
+        unique_id: kitchen_dishwasher_dashboard_saved_programme
+        default_entity_id: sensor.dishwasher_saved_programme
+        icon: mdi:dishwasher
+        state: >-
+          {% set invalid = ['', 'unknown', 'unavailable', 'none', 'null'] %}
+          {% set locked_modes = ['run', 'running', 'pause', 'paused', 'delayedstart',
+                                 'actionrequired', 'endofcycle', 'finished', 'complete',
+                                 'unknown', 'unavailable'] %}
+          {% set mode = states('sensor.kitchen_dishwasher_state') | trim | lower | replace('_', '') | replace('-', '') | replace(' ', '') %}
+          {% set selected = states('select.kitchen_dishwasher_programme') | trim %}
+          {% set saved = this.state | default('', true) | trim %}
+          {% set starting = false %}
+          {% if trigger.id == 'programme' %}
+            {% set selected = trigger.to_state.state | trim if trigger.to_state else '' %}
+            {% if (selected | lower) in invalid and trigger.from_state %}
+              {% set selected = trigger.from_state.state | trim %}
+            {% endif %}
+          {% elif trigger.id == 'appliance' and trigger.from_state %}
+            {% set previous_mode = trigger.from_state.state | trim | lower | replace('_', '') | replace('-', '') | replace(' ', '') %}
+            {% set starting = previous_mode in ['ready', 'readytostart', 'idle', 'standby', 'inactive', 'off']
+                               and mode in ['run', 'running', 'delayedstart'] %}
+          {% endif %}
+          {% if (selected | lower) not in invalid and (mode not in locked_modes or starting or (saved | lower) in invalid) %}
+            {{ selected }}
+          {% else %}
+            {{ saved if (saved | lower) not in invalid else none }}
+          {% endif %}
