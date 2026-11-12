@@ -245,3 +245,42 @@ test("independent browser sessions recover the same programme and keep the cycle
   assert.equal(await first.locator(".dw-program").textContent(), "QUICK");
   assert.equal(await first.locator(".dw-extra:visible").count(), 0);
 });
+
+test("Glass Care and Extra Power stay visible after a programme change masks the switches", async (t) => {
+  const browser = await chromium.launch({ executablePath: process.env.DISHWASHER_CHROMIUM });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  const at = (time, s) => ({ lu: Date.parse("2026-11-11T" + time + "Z") / 1000, s });
+  const history = {
+    [fixture.state_entity]: [at("08:00:00", "READY_TO_START")],
+    [fixture.glass_care_entity]: [at("08:02:00", "on"), at("08:05:00", "unavailable")],
+    [fixture.extra_power_entity]: [at("08:03:00", "on"), at("08:06:00", "unavailable")],
+  };
+  const states = {
+    state_entity: "READY_TO_START", programme_entity: "ECO",
+    glass_care_entity: "unavailable", extra_power_entity: "on",
+  };
+  await mount(page, shortConfig, true, { history, states });
+  const glass = page.getByRole("img", { name: "Glass Care" });
+  const power = page.getByRole("img", { name: "Extra Power" });
+  await glass.waitFor();
+  await power.waitFor();
+
+  await page.evaluate(() => window.updateCard({
+    programme_entity: "QUICK", extra_power_entity: "unavailable",
+  }, "2026-11-11T08:06:00Z"));
+  await page.getByText("QUICK", { exact: true }).waitFor();
+  await glass.waitFor();
+  await power.waitFor();
+
+  const second = await browser.newPage();
+  await mount(second, shortConfig, true, {
+    history, states: { ...states, programme_entity: "QUICK", extra_power_entity: "unavailable" },
+  });
+  await second.getByRole("img", { name: "Glass Care" }).waitFor();
+  await second.getByRole("img", { name: "Extra Power" }).waitFor();
+
+  await page.evaluate(() => window.updateCard({ glass_care_entity: "off" }));
+  await glass.waitFor({ state: "hidden" });
+  await power.waitFor();
+});

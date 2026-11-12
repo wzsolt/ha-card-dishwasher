@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.3.1]
+
+- Restore unavailable extra switches individually from Recorder before a cycle so Glass Care and Extra Power can appear together and stay visible when the programme changes.
+
 ## [0.3.0]
 
 - Recover the last valid programme when changing an extra makes the selector unavailable before a cycle.

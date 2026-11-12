@@ -1,5 +1,7 @@
 import { extraFields } from "./config.js";
-import { applianceMode, clockSeconds, durationSeconds, hasValue, usesCycleSnapshot } from "./data.js";
+import {
+  applianceMode, clockSeconds, durationSeconds, hasValue, switchState, usesCycleSnapshot,
+} from "./data.js";
 
 const second = 1000;
 const minute = 60 * second;
@@ -12,6 +14,8 @@ const historyFields = [
 const runningModes = new Set(["running", "paused", "delayedstart"]);
 const interruptedModes = new Set(["actionrequired", "unknown", "unavailable", ""]);
 const waitingModes = new Set(["ready", "readytostart", "idle", "standby", "inactive", "off", "finished", "aborted", "error"]);
+const resetModes = new Set(["finished", "aborted", "off"]);
+const selectionModes = new Set(["ready", "readytostart", "idle", "standby", "inactive"]);
 const retryDelays = [10 * second, 25 * second, 60 * second];
 
 function samples(history, id, end) {
@@ -48,13 +52,25 @@ function savedProgramme(history, config, cutoff) {
   return samples(history, config.programme_entity, cutoff).findLast(({ value }) => hasValue(value))?.value;
 }
 
-function savedExtras(history, config, cutoff) {
+function applianceSamples(history, config, cutoff) {
+  return samples(history, config.state_entity, cutoff).map(({ time, value }) => ({
+    time, mode: applianceMode(value),
+  }));
+}
+
+function savedExtras(history, config, recorded, cutoff, fields = extraFields) {
+  // An unavailable switch can hide a selection, but a previous cycle's extras can be reset.
+  const reset = recorded.findLast(({ time, mode }) => time <= cutoff && resetModes.has(mode));
   const extras = {};
-  for (const field of extraFields) {
+  for (const field of fields) {
     if (!config[field]) continue;
-    const state = samples(history, config[field], cutoff)
-      .findLast(({ value }) => value === "on" || value === "off");
-    if (state) extras[field] = state.value;
+    const states = samples(history, config[field], cutoff);
+    const lastKnown = states.findLastIndex(({ value }) => switchState(value));
+    if (lastKnown === -1) continue;
+    const unavailableSince = states[lastKnown + 1]?.time ?? Infinity;
+    if (unavailableSince >= (reset?.time ?? -Infinity)) {
+      extras[field] = switchState(states[lastKnown].value);
+    }
   }
   return extras;
 }
@@ -94,9 +110,7 @@ function remainingAtPause(history, hass, config, running, pausedAt) {
 export function recoverCycle(history, hass, config, now) {
   const live = hass.states[config.state_entity];
   const mode = applianceMode(live?.state ?? "");
-  const recorded = samples(history, config.state_entity, now).map(({ time, value }) => ({
-    time, mode: applianceMode(value),
-  }));
+  const recorded = applianceSamples(history, config, now);
   const liveTime = Date.parse(live?.last_changed);
   const latest = recorded.at(-1);
   if (Number.isFinite(liveTime) && liveTime <= now && (!latest || liveTime >= latest.time)
@@ -106,7 +120,7 @@ export function recoverCycle(history, hass, config, now) {
   if (started === undefined) return {};
   return {
     programme: savedProgramme(history, config, started),
-    extras: savedExtras(history, config, started),
+    extras: savedExtras(history, config, recorded, started),
     initialDuration: running === undefined ? undefined : initialSeconds(history, hass, config, running, now),
     remainingAtPause: mode === "paused" && running !== undefined
       ? remainingAtPause(history, hass, config, running, recorded.at(-1).time) : undefined,
@@ -129,26 +143,55 @@ export class CycleHistory {
     const selector = hass.states[config.programme_entity];
     const cycleLocked = usesCycleSnapshot(mode);
     const programmeMissing = config.programme_entity && !hasValue(selector?.state?.trim() ?? "");
-    if (!hass.callWS || (!cycleLocked && !programmeMissing)) {
+    const hiddenExtras = selectionModes.has(mode) ? extraFields.filter((field) => {
+      const entity = hass.states[config[field]];
+      return entity && !switchState(entity.state);
+    }) : [];
+    if (!hass.callWS || (!cycleLocked && !programmeMissing && !hiddenExtras.length)) {
       this.clear();
       return {};
     }
 
-    const fields = cycleLocked ? historyFields : ["programme_entity"];
+    const fields = cycleLocked ? historyFields : [
+      ...(programmeMissing ? ["programme_entity"] : []),
+      ...(hiddenExtras.length ? ["state_entity", ...hiddenExtras] : []),
+    ];
     const ids = [...new Set(fields.map((field) => config[field]).filter(Boolean))];
-    const changed = cycleLocked ? state?.last_changed : selector?.last_changed;
-    const key = JSON.stringify([fields.map((field) => config[field]), cycleLocked ? mode : "selection", changed]);
+    const selectionKey = hiddenExtras.length ? JSON.stringify([config.state_entity, state.last_changed]) : undefined;
+    const extraChanges = hiddenExtras.map((field) => [field, config[field], hass.states[config[field]].last_changed]);
+    const key = JSON.stringify(cycleLocked
+      ? [fields.map((field) => config[field]), mode, state.last_changed]
+      : ["selection", programmeMissing ? [config.programme_entity, selector?.last_changed] : null, selectionKey, extraChanges]);
     const connection = hass.connection ?? hass.callWS;
     if (this.current?.key !== key || this.current.connection !== connection) {
+      const previous = this.current;
       this.clear();
-      const age = Date.now() - Date.parse(changed);
-      this.current = { key, connection, value: {}, attempts: 0, recent: age >= 0 && age < retryDelays[0] };
-      this.load(hass, config, ids, mode, this.current);
+      const value = {};
+      if (selectionKey && previous?.selectionKey === selectionKey && previous.connection === connection) {
+        const unchanged = extraChanges.filter(([field, id, changed]) => previous.extraChanges
+          .some(([oldField, oldId, oldChanged]) => field === oldField && id === oldId && changed === oldChanged));
+        value.extras = Object.fromEntries(unchanged.map(([field]) => [field, previous.value.extras?.[field]]));
+      }
+      const transitions = cycleLocked ? [state.last_changed] : [
+        ...(programmeMissing ? [selector?.last_changed] : []),
+        ...extraChanges.map(([, , changed]) => changed),
+      ];
+      const now = Date.now();
+      const recent = transitions.some((changed) => {
+        const age = now - Date.parse(changed);
+        return age >= 0 && age < retryDelays[0];
+      });
+      this.current = {
+        key, connection, selectionKey, extraChanges, value, attempts: 0, recent,
+        ids, mode, hiddenExtras, needsProgramme: programmeMissing,
+      };
+      this.load(hass, config, this.current);
     }
     return this.current.value;
   }
 
-  async load(hass, config, ids, mode, current) {
+  async load(hass, config, current) {
+    const { ids, mode, hiddenExtras, needsProgramme } = current;
     const now = Date.now();
     const cycleLocked = usesCycleSnapshot(mode);
     try {
@@ -163,23 +206,25 @@ export class CycleHistory {
         significant_changes_only: false,
       });
       if (current !== this.current) return;
-      current.value = cycleLocked
-        ? recoverCycle(history, hass, config, now)
-        : { programme: savedProgramme(history, config, now) };
+      current.value = cycleLocked ? recoverCycle(history, hass, config, now) : {
+        programme: needsProgramme ? savedProgramme(history, config, now) : undefined,
+        extras: savedExtras(history, config, applianceSamples(history, config, now), now, hiddenExtras),
+      };
       this.onChange();
     } catch {
       // Live readings and the optional legacy helpers are still available.
     }
     if (current !== this.current) return;
-    const programmeMissing = config.programme_entity && !current.value.programme;
+    const programmeMissing = (cycleLocked || needsProgramme) && config.programme_entity && !current.value.programme;
     const durationMissing = cycleLocked && mode !== "delayedstart" && mode !== "finished"
       && !current.value.initialDuration;
-    const extrasMissing = cycleLocked && extraFields.some((field) => config[field] && !current.value.extras?.[field]);
+    const extrasMissing = (cycleLocked ? extraFields : hiddenExtras)
+      .some((field) => config[field] && !current.value.extras?.[field]);
     // A fresh transition can still be waiting for Recorder to commit newer samples.
     const fresh = current.recent && current.attempts === 0;
     const delay = retryDelays[current.attempts++];
     if (delay && (fresh || programmeMissing || durationMissing || extrasMissing)) {
-      this.timer = setTimeout(() => this.load(hass, config, ids, mode, current), delay);
+      this.timer = setTimeout(() => this.load(hass, config, current), delay);
     }
   }
 }

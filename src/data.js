@@ -51,6 +51,11 @@ export function clockSeconds(value) {
   return minutes < 60 && seconds < 60 && Number.isSafeInteger(total) ? total : NaN;
 }
 
+export function switchState(value) {
+  const state = value?.trim().toLowerCase();
+  return state === "on" || state === "off" ? state : undefined;
+}
+
 export function applianceMode(value) {
   const mode = key(value);
   if (mode === "run") return "running";
@@ -102,7 +107,7 @@ export function dishwasherView(hass, config, now = Date.now(), cycle = {}) {
   const rawProgramme = ((cycleLocked || unavailableModes.has(mode)) && remembered)
     || (hasValue(liveProgramme) ? liveProgramme : cycle.programme || (hasValue(saved) ? saved : ""));
   const extras = extraFields.filter((field) =>
-    (cycleLocked ? cycle.extras?.[field] : read(field).toLowerCase()) === "on");
+    (cycleLocked ? cycle.extras?.[field] : switchState(read(field)) ?? cycle.extras?.[field]) === "on");
   const rawPhase = read("cycle_phase_entity");
   const phase = key(rawPhase);
   const cycles = number(read("cycles_run_entity"));

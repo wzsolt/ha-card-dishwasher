@@ -168,3 +168,61 @@ test("retries a fresh unknown programme even if Recorder initially returns an ol
   assert.deepEqual(loader.update(hass, config), {});
   assert.equal(calls, 2);
 });
+
+test("recovers unavailable extras independently and respects a live off after a programme change", async (t) => {
+  const { history, hass } = recorded("READY_TO_START");
+  hass.states[config.programme_entity].state = "ECO";
+  hass.states[config.extra_power_entity] = { state: "on" };
+  hass.states[config.glass_care_entity] = { state: "unavailable" };
+  history[config.state_entity] = [sample("09:00:00", "READY_TO_START")];
+  history[config.glass_care_entity] = [sample("10:05:00", "on"), sample("10:10:00", "unavailable")];
+
+  const requests = [];
+  hass.callWS = async (request) => {
+    requests.push(request.entity_ids);
+    return history;
+  };
+  const loader = new CycleHistory(() => {});
+  t.after(() => loader.clear());
+  loader.update(hass, config);
+  await Promise.resolve();
+  assert.deepEqual(requests, [[config.state_entity, config.glass_care_entity]]);
+  const view = () => dishwasherView(hass, config, now, loader.update(hass, config));
+  assert.deepEqual(view().extras, ["extra_power_entity", "glass_care_entity"]);
+
+  hass.states[config.programme_entity].state = "QUICK";
+  assert.equal(view().programme, "QUICK");
+  assert.deepEqual(view().extras, ["extra_power_entity", "glass_care_entity"]);
+  assert.equal(requests.length, 1);
+
+  history[config.extra_power_entity] = [sample("10:06:00", "on"), sample("10:11:00", "unavailable")];
+  hass.states[config.extra_power_entity].state = "unavailable";
+  assert.deepEqual(view().extras, ["glass_care_entity"]);
+  await Promise.resolve();
+  assert.deepEqual(view().extras, ["extra_power_entity", "glass_care_entity"]);
+
+  hass.states[config.glass_care_entity].state = "off";
+  assert.deepEqual(view().extras, ["extra_power_entity"]);
+});
+
+test("unavailable switches cannot carry an earlier cycle's extras into the next selection or cycle", async (t) => {
+  const { history, hass } = recorded("READY_TO_START", "10:50:00");
+  history[config.state_entity].push(sample("10:45:00", "END_OF_CYCLE"), sample("10:50:00", "READY_TO_START"));
+  history[config.extra_power_entity] = [sample("09:45:00", "on"), sample("10:00:01", "unavailable")];
+  hass.states[config.extra_power_entity] = { state: "unavailable" };
+  hass.states[config.programme_entity].state = "QUICK";
+  hass.callWS = async () => history;
+  const loader = new CycleHistory(() => {});
+  t.after(() => loader.clear());
+  loader.update(hass, config);
+  await Promise.resolve();
+  assert.deepEqual(loader.update(hass, config).extras, {});
+
+  history[config.state_entity].push(sample("10:55:00", "RUNNING"));
+  hass.states[config.state_entity] = { state: "RUNNING", last_changed: new Date(time("10:55:00")).toISOString() };
+  assert.deepEqual(recoverCycle(history, hass, config, now).extras, {});
+
+  // A switch that continued to report on through the reset belongs to the new selection.
+  history[config.extra_power_entity] = [sample("09:45:00", "on"), sample("10:52:00", "unavailable")];
+  assert.deepEqual(recoverCycle(history, hass, config, now).extras, { extra_power_entity: "on" });
+});
