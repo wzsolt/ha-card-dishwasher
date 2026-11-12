@@ -11,7 +11,7 @@ import { fixture } from "./fixture.js";
 const shortConfig = parse(readFileSync(new URL("../examples/aeg-dishwasher.yaml", import.meta.url), "utf8"));
 const tag = "ha-card-dishwasher";
 
-async function mount(page, config = fixture, recorder = false) {
+async function mount(page, config = fixture, recorder = false, initial = {}) {
   await page.clock.install({ time: new Date("2026-11-11T09:00:00Z") });
   await page.setContent('<style>body { font: 16px Roboto, sans-serif; }</style><main></main>');
   await page.evaluate(() => {
@@ -20,12 +20,12 @@ async function mount(page, config = fixture, recorder = false) {
     customElements.define("ha-form", class extends HTMLElement {});
   });
   await page.addScriptTag({ path: bundle, type: "module" });
-  await page.evaluate(({ config, fixture, tag, recorder }) => {
+  await page.evaluate(({ config, fixture, tag, recorder, initial }) => {
     window.card = document.createElement(tag);
     window.card.setConfig(config);
-    window.updateCard = (values) => {
+    window.updateCard = (values, last_changed = "2026-11-11T08:00:00Z") => {
       for (const [field, state] of Object.entries(values)) {
-        window.states[fixture[field]] = { state, last_changed: "2026-11-11T08:00:00Z" };
+        window.states[fixture[field]] = { state, last_changed };
       }
       window.card.hass = {
         states: { ...window.states }, config: { time_zone: "Europe/Budapest" }, locale: { language: "hu" },
@@ -34,8 +34,10 @@ async function mount(page, config = fixture, recorder = false) {
     };
     window.states = {};
     window.calls = [];
+    window.historyRows = initial.history;
     window.callWS = async (request) => {
       window.calls.push(request);
+      if (window.historyRows) return window.historyRows;
       const at = (time, s, a) => ({ lu: Date.parse("2026-11-11T" + time + "Z") / 1000, s, a });
       return {
         [fixture.state_entity]: [at("07:00:00", "READY_TO_START"), at("08:00:00", "RUNNING")],
@@ -48,9 +50,10 @@ async function mount(page, config = fixture, recorder = false) {
       programme_entity: "unavailable", saved_programme_entity: "ECO",
       cycles_run_entity: "123", progress_percentage_entity: "62", time_remaining_entity: "4440",
       finishes_at_entity: "2026-11-11T10:14:00Z", connection_entity: "on", time_to_end_entity: "4440",
+      ...initial.states,
     });
     document.querySelector("main").append(window.card);
-  }, { config, fixture, tag, recorder });
+  }, { config, fixture, tag, recorder, initial });
 }
 
 test("renders the reference layout and preserves the animation across data updates", async (t) => {
@@ -183,4 +186,62 @@ test("editor discovers settings from the selected device and preserves manual ov
   assert.deepEqual(result.changes[1].grid_options, { columns: 9 });
   assert.equal(result.stub.state_entity, fixture.state_entity);
   assert.equal(result.stub.programme_entity, fixture.programme_entity);
+});
+
+test("independent browser sessions recover the same programme and keep the cycle extras", async (t) => {
+  const browser = await chromium.launch({ executablePath: process.env.DISHWASHER_CHROMIUM });
+  t.after(() => browser.close());
+  const first = await browser.newPage({ viewport: { width: 240, height: 420 } });
+  const second = await browser.newPage();
+  const at = (time, s) => ({ lu: Date.parse("2026-11-11T" + time + "Z") / 1000, s });
+  const history = {
+    [fixture.state_entity]: [
+      at("07:00:00", "READY_TO_START"), at("08:15:00", "DELAYED_START"),
+      at("08:20:00", "RUNNING"), at("08:30:00", "PAUSED"), at("08:40:00", "END_OF_CYCLE"),
+    ],
+    [fixture.programme_entity]: [at("07:58:00", "ECO"), at("07:59:59", "unknown")],
+    [fixture.extra_silent_entity]: [at("07:59:00", "on"), at("08:20:01", "off")],
+    [fixture.extra_power_entity]: [at("07:59:05", "on"), at("08:20:01", "off")],
+    [fixture.glass_care_entity]: [at("07:59:09", "on"), at("08:20:01", "off")],
+  };
+  const ready = { state_entity: "READY_TO_START", programme_entity: "ECO" };
+  const options = { extra_silent_entity: "on", extra_power_entity: "on", glass_care_entity: "on" };
+  await mount(first, shortConfig, true, { history, states: ready });
+  await first.getByText("Eco", { exact: true }).waitFor();
+  await first.evaluate((values) => window.updateCard(values), { ...options, programme_entity: "unknown" });
+  await mount(second, shortConfig, true, { history, states: { ...ready, ...options, programme_entity: "unknown" } });
+
+  for (const page of [first, second]) {
+    await page.getByText("Eco", { exact: true }).waitFor();
+    for (const name of ["Extra Silent", "Extra Power", "Glass Care"]) {
+      assert.equal(await page.getByRole("img", { name }).isVisible(), true);
+    }
+    const calls = await page.evaluate(() => window.calls);
+    assert.deepEqual(calls[0].entity_ids, [fixture.programme_entity]);
+  }
+  assert.equal(await first.locator("ha-card").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+
+  for (const [mode, time] of [
+    ["DELAYED_START", "08:15:00"], ["RUNNING", "08:20:00"], ["PAUSED", "08:30:00"], ["END_OF_CYCLE", "08:40:00"],
+  ]) {
+    // A new dashboard receives only the records Home Assistant has at this point.
+    const cutoff = at(time, mode).lu;
+    const records = Object.fromEntries(Object.entries(history).map(([id, rows]) => [
+      id, rows.filter(({ lu }) => lu <= cutoff + 1),
+    ]));
+    for (const page of [first, second]) {
+      await page.evaluate(({ mode, time, records }) => {
+        window.historyRows = records;
+        window.updateCard({
+          state_entity: mode, extra_silent_entity: "off", extra_power_entity: "off", glass_care_entity: "off",
+        }, "2026-11-11T" + time + "Z");
+      }, { mode, time, records });
+      await page.getByText("Eco", { exact: true }).waitFor();
+      assert.equal(await page.locator(".dw-extra:visible").count(), 3);
+    }
+  }
+
+  await first.evaluate(() => window.updateCard({ state_entity: "READY_TO_START", programme_entity: "QUICK" }));
+  assert.equal(await first.locator(".dw-program").textContent(), "QUICK");
+  assert.equal(await first.locator(".dw-extra:visible").count(), 0);
 });

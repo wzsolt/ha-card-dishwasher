@@ -27,6 +27,7 @@ const en = {
   selectDishwasher: "Select the dishwasher or its state entity.",
   fields: {
     device_id: "Dishwasher device", state_entity: "Dishwasher state", programme_entity: "Programme",
+    extra_silent_entity: "Extra Silent", extra_power_entity: "Extra Power", glass_care_entity: "Glass Care",
     cycle_phase_entity: "Cycle phase", door_entity: "Door", connection_entity: "Connection",
     alerts_entity: "Alerts", cycles_run_entity: "Completed cycles", finishes_at_entity: "Estimated finish",
     time_to_end_entity: "Remaining time", time_to_end_formatted_entity: "Formatted remaining time",
@@ -65,6 +66,7 @@ const hu = {
   selectDishwasher: "Válaszd ki a mosogatógépet vagy az állapotentitását.",
   fields: {
     device_id: "Mosogatógép", state_entity: "Mosogatógép állapota", programme_entity: "Program",
+    extra_silent_entity: "Extra Silent", extra_power_entity: "Extra Power", glass_care_entity: "Glass Care",
     cycle_phase_entity: "Ciklusfázis", door_entity: "Ajtó", connection_entity: "Kapcsolat",
     alerts_entity: "Figyelmeztetések", cycles_run_entity: "Lefutott ciklusok", finishes_at_entity: "Várható befejezés",
     time_to_end_entity: "Hátralévő idő", time_to_end_formatted_entity: "Formázott hátralévő idő",

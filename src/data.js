@@ -1,10 +1,13 @@
+import { extraFields } from "./config.js";
 import { labels, localeFor } from "./text.js";
 
 const absent = new Set(["", "unknown", "unavailable", "none", "null"]);
-const holdProgramme = new Set([
-  "run", "running", "pause", "paused", "delayedstart", "actionrequired",
-  "endofcycle", "finished", "complete", "unknown", "unavailable", "",
-]);
+const cycleModes = new Set(["running", "paused", "delayedstart", "actionrequired", "finished"]);
+const unavailableModes = new Set(["unknown", "unavailable", ""]);
+
+export function usesCycleSnapshot(mode) {
+  return cycleModes.has(mode);
+}
 const openDoors = new Set(["open", "opened", "ajar", "partlyopen", "partiallyopen", "on", "true"]);
 const closedDoors = new Set(["closed", "close", "locked", "off", "false"]);
 const hiddenPhases = new Set(["0", "idle", "finished", "endofcycle", "notset", "invalid"]);
@@ -93,8 +96,13 @@ export function dishwasherView(hass, config, now = Date.now(), cycle = {}) {
     else if (finished) animation = "finished";
   }
   const saved = read("saved_programme_entity");
+  const liveProgramme = read("programme_entity");
+  const cycleLocked = usesCycleSnapshot(mode);
   const remembered = hasValue(saved) ? saved : cycle.programme;
-  const rawProgramme = holdProgramme.has(mode) && remembered ? remembered : read("programme_entity");
+  const rawProgramme = ((cycleLocked || unavailableModes.has(mode)) && remembered)
+    || (hasValue(liveProgramme) ? liveProgramme : cycle.programme || (hasValue(saved) ? saved : ""));
+  const extras = extraFields.filter((field) =>
+    (cycleLocked ? cycle.extras?.[field] : read(field).toLowerCase()) === "on");
   const rawPhase = read("cycle_phase_entity");
   const phase = key(rawPhase);
   const cycles = number(read("cycles_run_entity"));
@@ -113,7 +121,7 @@ export function dishwasherView(hass, config, now = Date.now(), cycle = {}) {
     ? Math.floor(100 * (cycle.initialDuration - forProgress) / cycle.initialDuration) : NaN;
   const estimate = Number.isFinite(savedEstimate) && savedEstimate >= 0 ? savedEstimate : Math.max(0, elapsed);
   return {
-    text, door, animation,
+    text, door, animation, extras,
     status: Object.hasOwn(text.states, status) ? text.states[status] : text.states.unknown,
     programme: programmeName(hass, hass.states[config.programme_entity], rawProgramme, text.noProgramme),
     eco: /(?:^|[^a-z0-9])eco(?:$|[^a-z])/i.test(rawProgramme),

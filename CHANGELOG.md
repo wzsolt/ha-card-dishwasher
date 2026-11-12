@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.0]
+
+- Recover the last valid programme when changing an extra makes the selector unavailable before a cycle.
+- Show Extra Silent, Extra Power and Glass Care and use Recorder to restore their states at cycle start.
+
 ## [0.2.0]
 
 - Recover the cycle programme and initial duration from Recorder and read the countdown directly from the appliance.

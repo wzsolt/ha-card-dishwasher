@@ -89,13 +89,16 @@ test("discovery handles the device registry, entity prefixes and multiple dishwa
   const entries = [
     ["sensor.custom_status", "state", "chosen"], ["select.custom_cycle", "programme", "chosen"],
     ["sensor.custom_phase", "cycle_phase", "chosen"], ["sensor.wrong_time_to_end", "time_to_end", "other"],
+    ["switch.custom_silent", "userSelections.extraSilentOption", "chosen"],
+    ["switch.other_glass", "glass_care", "other"],
   ];
   hass.entities = Object.fromEntries(entries.map(([entity_id, translation_key, device_id]) => {
     states[entity_id] = { state: "unknown" };
     return [entity_id, { entity_id, translation_key, device_id, platform: "aeg" }];
   }));
   assert.deepEqual(discoverEntities(hass, { device_id: "chosen" }), {
-    state_entity: "sensor.custom_status", programme_entity: "select.custom_cycle", cycle_phase_entity: "sensor.custom_phase",
+    state_entity: "sensor.custom_status", programme_entity: "select.custom_cycle",
+    cycle_phase_entity: "sensor.custom_phase", extra_silent_entity: "switch.custom_silent",
   });
 });
 
@@ -114,4 +117,54 @@ test("a slow Recorder response for a previous configuration cannot replace the c
   await Promise.resolve();
   assert.equal(changes[0].programme, undefined);
   loader.clear();
+});
+
+test("locks selected extras and a programme made unknown well before start", () => {
+  const { history, hass } = recorded("END_OF_CYCLE", "10:55:00");
+  history[config.state_entity].splice(1, 0, sample("09:45:00", "DELAYED_START"));
+  history[config.state_entity].push(sample("10:30:00", "PAUSED"), sample("10:55:00", "END_OF_CYCLE"));
+  history[config.programme_entity] = [
+    sample("09:05:00", "ECO"), sample("09:06:00", "unknown"), sample("10:01:00", "QUICK"),
+  ];
+  history[config.extra_silent_entity] = [
+    sample("09:06:00", "on"), sample("09:30:00", "unavailable"), sample("09:45:01", "off"),
+  ];
+  history[config.extra_power_entity] = [sample("09:10:00", "on"), sample("09:11:00", "off")];
+  history[config.glass_care_entity] = [sample("09:45:01", "on")];
+  hass.states[config.extra_silent_entity] = { state: "off" };
+  hass.states[config.glass_care_entity] = { state: "on" };
+  const cycle = recoverCycle(history, hass, config, now);
+  assert.equal(cycle.programme, "ECO");
+  assert.deepEqual(cycle.extras, { extra_silent_entity: "on", extra_power_entity: "off" });
+  assert.deepEqual(dishwasherView(hass, config, now, cycle).extras, ["extra_silent_entity"]);
+
+  hass.states[config.state_entity].state = "READY_TO_START";
+  hass.states[config.programme_entity].state = "QUICK";
+  assert.deepEqual(dishwasherView(hass, config, now, cycle).extras, ["glass_care_entity"]);
+  assert.equal(dishwasherView(hass, config, now, cycle).programme, "QUICK");
+});
+
+test("retries a fresh unknown programme even if Recorder initially returns an older selection", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now });
+  const { history, hass } = recorded("READY_TO_START");
+  hass.states[config.programme_entity] = { state: "unknown", last_changed: new Date(now).toISOString() };
+  let calls = 0;
+  hass.callWS = async (request) => {
+    assert.deepEqual(request.entity_ids, [config.programme_entity]);
+    calls++;
+    return calls === 1 ? history : {
+      [config.programme_entity]: [...history[config.programme_entity], sample("10:59:59", "AUTO")],
+    };
+  };
+  const loader = new CycleHistory(() => {});
+  t.after(() => loader.clear());
+  loader.update(hass, config);
+  await Promise.resolve();
+  assert.equal(loader.update(hass, config).programme, "ECO");
+  t.mock.timers.tick(10_000);
+  await Promise.resolve();
+  assert.equal(loader.update(hass, config).programme, "AUTO");
+  hass.states[config.programme_entity].state = "QUICK";
+  assert.deepEqual(loader.update(hass, config), {});
+  assert.equal(calls, 2);
 });

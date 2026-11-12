@@ -1,4 +1,5 @@
-import { applianceMode, clockSeconds, durationSeconds, hasValue } from "./data.js";
+import { extraFields } from "./config.js";
+import { applianceMode, clockSeconds, durationSeconds, hasValue, usesCycleSnapshot } from "./data.js";
 
 const second = 1000;
 const minute = 60 * second;
@@ -6,6 +7,7 @@ const lookback = 3 * 24 * 60 * minute;
 const initialWindow = 2 * minute;
 const historyFields = [
   "state_entity", "programme_entity", "time_to_end_entity", "time_to_end_formatted_entity", "finishes_at_entity",
+  ...extraFields,
 ];
 const runningModes = new Set(["running", "paused", "delayedstart"]);
 const interruptedModes = new Set(["actionrequired", "unknown", "unavailable", ""]);
@@ -42,14 +44,19 @@ function cycleStarts(states, mode) {
   return {};
 }
 
-function savedProgramme(programmes, started) {
-  const before = programmes.filter(({ time }) => time <= started);
-  const latest = before.at(-1);
-  if (!latest) return undefined;
-  if (hasValue(latest.value)) return latest.value;
-  const lost = before.findLastIndex(({ time, value }, index) => time >= started - initialWindow
-    && !hasValue(value) && index > 0 && hasValue(before[index - 1].value));
-  return lost > 0 ? before[lost - 1].value : undefined;
+function savedProgramme(history, config, cutoff) {
+  return samples(history, config.programme_entity, cutoff).findLast(({ value }) => hasValue(value))?.value;
+}
+
+function savedExtras(history, config, cutoff) {
+  const extras = {};
+  for (const field of extraFields) {
+    if (!config[field]) continue;
+    const state = samples(history, config[field], cutoff)
+      .findLast(({ value }) => value === "on" || value === "off");
+    if (state) extras[field] = state.value;
+  }
+  return extras;
 }
 
 function initialSeconds(history, hass, config, started, end) {
@@ -98,7 +105,8 @@ export function recoverCycle(history, hass, config, now) {
   const { started, running } = cycleStarts(recorded, mode);
   if (started === undefined) return {};
   return {
-    programme: savedProgramme(samples(history, config.programme_entity, now), started),
+    programme: savedProgramme(history, config, started),
+    extras: savedExtras(history, config, started),
     initialDuration: running === undefined ? undefined : initialSeconds(history, hass, config, running, now),
     remainingAtPause: mode === "paused" && running !== undefined
       ? remainingAtPause(history, hass, config, running, recorded.at(-1).time) : undefined,
@@ -118,17 +126,23 @@ export class CycleHistory {
   update(hass, config) {
     const state = hass.states[config.state_entity];
     const mode = applianceMode(state?.state ?? "");
-    if (!hass.callWS || (!runningModes.has(mode) && mode !== "finished" && mode !== "actionrequired")) {
+    const selector = hass.states[config.programme_entity];
+    const cycleLocked = usesCycleSnapshot(mode);
+    const programmeMissing = config.programme_entity && !hasValue(selector?.state?.trim() ?? "");
+    if (!hass.callWS || (!cycleLocked && !programmeMissing)) {
       this.clear();
       return {};
     }
 
-    const ids = [...new Set(historyFields.map((field) => config[field]).filter(Boolean))];
-    const key = JSON.stringify([ids, mode, state.last_changed]);
+    const fields = cycleLocked ? historyFields : ["programme_entity"];
+    const ids = [...new Set(fields.map((field) => config[field]).filter(Boolean))];
+    const changed = cycleLocked ? state?.last_changed : selector?.last_changed;
+    const key = JSON.stringify([fields.map((field) => config[field]), cycleLocked ? mode : "selection", changed]);
     const connection = hass.connection ?? hass.callWS;
     if (this.current?.key !== key || this.current.connection !== connection) {
       this.clear();
-      this.current = { key, connection, value: {}, attempts: 0 };
+      const age = Date.now() - Date.parse(changed);
+      this.current = { key, connection, value: {}, attempts: 0, recent: age >= 0 && age < retryDelays[0] };
       this.load(hass, config, ids, mode, this.current);
     }
     return this.current.value;
@@ -136,6 +150,7 @@ export class CycleHistory {
 
   async load(hass, config, ids, mode, current) {
     const now = Date.now();
+    const cycleLocked = usesCycleSnapshot(mode);
     try {
       const history = await hass.callWS({
         type: "history/history_during_period",
@@ -148,16 +163,22 @@ export class CycleHistory {
         significant_changes_only: false,
       });
       if (current !== this.current) return;
-      current.value = recoverCycle(history, hass, config, now);
+      current.value = cycleLocked
+        ? recoverCycle(history, hass, config, now)
+        : { programme: savedProgramme(history, config, now) };
       this.onChange();
     } catch {
       // Live readings and the optional legacy helpers are still available.
     }
     if (current !== this.current) return;
     const programmeMissing = config.programme_entity && !current.value.programme;
-    const durationMissing = mode !== "delayedstart" && mode !== "finished" && !current.value.initialDuration;
+    const durationMissing = cycleLocked && mode !== "delayedstart" && mode !== "finished"
+      && !current.value.initialDuration;
+    const extrasMissing = cycleLocked && extraFields.some((field) => config[field] && !current.value.extras?.[field]);
+    // A fresh transition can still be waiting for Recorder to commit newer samples.
+    const fresh = current.recent && current.attempts === 0;
     const delay = retryDelays[current.attempts++];
-    if (delay && (programmeMissing || durationMissing)) {
+    if (delay && (fresh || programmeMissing || durationMissing || extrasMissing)) {
       this.timer = setTimeout(() => this.load(hass, config, ids, mode, current), delay);
     }
   }

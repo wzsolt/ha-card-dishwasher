@@ -7,7 +7,7 @@
 [![Release](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fwzsolt%2Fha-card-dishwasher%2Frelease-badge%2Frelease.json)](https://github.com/wzsolt/ha-card-dishwasher/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
-A read-only dashboard card for an AEG dishwasher in Home Assistant 2026.10 or later. It shows the programme, phase, estimated progress, finish time, door and alerts. The illustration animates when a cycle is running, scheduled or finished with the door closed. The card respects reduced-motion preferences and displays labels in Hungarian or English.
+A read-only dashboard card for an AEG dishwasher in Home Assistant 2026.10 or later. It shows the programme, phase, estimated progress, finish time, selected extras, door and alerts. The illustration animates when a cycle is running, scheduled or finished with the door closed. The card respects reduced-motion preferences and displays labels in Hungarian or English.
 
 The card reads dishwasher data from Home Assistant entities provided by the [AEG integration maintained by Renaud Allard](https://github.com/renaudallard/homeassistant_aeg).
 
@@ -41,6 +41,9 @@ Use `device_id` or `state_entity` to choose the appliance in YAML. If a single d
 | `device_id` | Home Assistant device ID for discovering the appliance and its entities. |
 | `state_entity` | Appliance state, such as `RUNNING`, `PAUSED`, `DELAYED_START` or `END_OF_CYCLE`. |
 | `programme_entity` | Programme select entity. The header shows the programme and adds a leaf for Eco. |
+| `extra_silent_entity` | Extra Silent switch. |
+| `extra_power_entity` | Extra Power switch. |
+| `glass_care_entity` | Glass Care switch. |
 | `cycle_phase_entity` | Active phase, such as prewash, rinse, or drying. |
 | `door_entity` | Door state. A known closed door is required for animation. |
 | `connection_entity` | Binary sensor. An explicit `off` shows the disconnected state. |
@@ -50,9 +53,11 @@ Use `device_id` or `state_entity` to choose the appliance in YAML. If a single d
 | `time_to_end_entity` | Numeric remaining time from the appliance. The card reads the sensor unit and defaults to seconds when absent. |
 | `time_to_end_formatted_entity` | Remaining time in `H:MM` or `H:MM:SS`, used when the numeric countdown is unavailable. |
 
-### Programme and estimated progress
+### Programme, extras and estimated progress
 
-The card uses [Home Assistant Recorder](https://www.home-assistant.io/integrations/recorder/) to find the latest cycle in the past three days, recover the last programme selected before it started, and read the initial duration near the transition to running. It can recover these values even if the dashboard was closed during the transition. Recorder must retain the appliance state, programme selection and at least one of the timing entities. With incomplete history, the card keeps showing current readings and displays the recovered programme and estimate when the necessary records are available. The estimate is capped at 99% until the appliance reports completion.
+Before a cycle, the card shows the selected programme and the active extras. If changing an extra causes the programme selector to report `unknown` or `unavailable`, the card looks up its last valid selection. From delayed start or the start of a running cycle through completion, the header shows the programme and extras selected at that transition. Extra Silent, Extra Power and Glass Care each have an icon when selected.
+
+The card reads the last three days of [Home Assistant Recorder](https://www.home-assistant.io/integrations/recorder/) history. Recorder must retain the appliance state, programme selector, the extra switches you want to recover, and at least one timing entity for the estimate. The data comes from Home Assistant even when the dashboard was closed during the change. If history is incomplete, the card shows the readings it can recover. The estimate is capped at 99% until the appliance reports completion.
 
 ### Migrate from v0.1 or Button Card
 

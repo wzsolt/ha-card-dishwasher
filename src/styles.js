@@ -46,6 +46,8 @@ ha-card {
 
 .dw-header-badges {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 4px;
   margin-inline-start: auto;
@@ -203,6 +205,7 @@ ha-card {
 .dw-door-closed { background: #342421; color: #ea6d62; }
 
 .dw-eco { background: #21372a; color: #7ed89c; }
+.dw-extra { background: #153544; color: #85cbed; }
 
 .dw-cycle-count { background: #153544; color: #85cbed; font-variant-numeric:
 tabular-nums; }

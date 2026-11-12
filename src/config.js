@@ -1,8 +1,16 @@
 export const CARD_TYPE = "ha-card-dishwasher";
 
+const extraRoles = {
+  extra_silent_entity: ["switch", "extra_silent", "extra_silent_option", "user_selections_extra_silent", "user_selections_extra_silent_option"],
+  extra_power_entity: ["switch", "extra_power", "extra_power_option", "user_selections_extra_power", "user_selections_extra_power_option"],
+  glass_care_entity: ["switch", "glass_care", "glass_care_option", "user_selections_glass_care", "user_selections_glass_care_option"],
+};
+export const extraFields = Object.keys(extraRoles);
+
 const roles = {
   state_entity: ["sensor", "state", "appliance_state", "dishwasher_state"],
   programme_entity: ["select", "programme", "program"],
+  ...extraRoles,
   cycle_phase_entity: ["sensor", "cycle_phase"],
   door_entity: ["sensor", "door", "door_state"],
   connection_entity: ["binary_sensor", "connection"],
@@ -34,8 +42,9 @@ function only(values) {
 }
 
 function matchesKey(entry, keys) {
-  const key = entry.translation_key?.toLowerCase();
-  return keys.includes(key) || keys.some((role) => key === "dishwasher_" + role);
+  const compact = (value) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const key = compact(entry.translation_key ?? "");
+  return keys.some((role) => key === compact(role) || key === "dishwasher" + compact(role));
 }
 
 function matchingEntries(entries, [domain, ...keys]) {

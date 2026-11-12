@@ -4,7 +4,7 @@ import runningImage from "./assets/running.webp";
 import runningBaseline from "./assets/running-baseline.webp";
 import delayedImage from "./assets/delayed.webp";
 import finishedImage from "./assets/finished.webp";
-import { CARD_TYPE, discoverEntities, normalizeConfig, resolveConfig } from "./config.js";
+import { CARD_TYPE, discoverEntities, extraFields, normalizeConfig, resolveConfig } from "./config.js";
 import { dishwasherView } from "./data.js";
 import { DishwasherEditor, loadEditorForm } from "./editor.js";
 import { CycleHistory } from "./history.js";
@@ -13,6 +13,12 @@ import { styles } from "./styles.js";
 
 const animations = { running: runningImage, delayed: delayedImage, finished: finishedImage };
 const doorIcons = { open: "door-open", closed: "door-closed", unknownDoor: "help-circle-outline" };
+
+const extraIcons = {
+  extra_silent_entity: "volume-off",
+  extra_power_entity: "lightning-bolt",
+  glass_care_entity: "glass-wine",
+};
 
 const template = document.createElement("template");
 template.innerHTML = `
@@ -28,6 +34,10 @@ template.innerHTML = `
         </div>
         <div class="dw-header-badges">
           <span class="dw-chip dw-eco" role="img" hidden><ha-icon icon="mdi:leaf" aria-hidden="true"></ha-icon></span>
+          ${extraFields.map((field) => `
+            <span class="dw-chip dw-extra" data-extra="${field}" role="img" hidden>
+              <ha-icon icon="mdi:${extraIcons[field]}" aria-hidden="true"></ha-icon>
+            </span>`).join("")}
           <span class="dw-chip dw-cycle-count"></span>
         </div>
       </div>
@@ -69,6 +79,7 @@ class DishwasherCard extends HTMLElement {
       "title", "program", "eco", "cycle-count", "appliance", "appliance-frame", "steam",
       "percent", "percent-value", "status", "track", "fill", "time", "phase", "door", "alert",
     ].map((name) => [name, this.shadowRoot.querySelector(".dw-" + name)]));
+    this.extraBadges = [...this.shadowRoot.querySelectorAll("[data-extra]")];
     this.dashboard = this.shadowRoot.querySelector(".dw");
     this.setupMessage = this.shadowRoot.querySelector(".dw-setup");
     this.history = new CycleHistory(() => this.update());
@@ -157,6 +168,12 @@ class DishwasherCard extends HTMLElement {
     nodes.eco.hidden = !view.eco;
     nodes.eco.title = text.eco;
     nodes.eco.setAttribute("aria-label", text.eco);
+    for (const badge of this.extraBadges) {
+      const field = badge.dataset.extra;
+      badge.hidden = !view.extras.includes(field);
+      badge.title = text.fields[field];
+      badge.setAttribute("aria-label", badge.title);
+    }
     nodes["cycle-count"].title = text.cycleCountHelp;
     setText(nodes["cycle-count"], `${text.cycleCount}: ${view.cycles}`);
 
